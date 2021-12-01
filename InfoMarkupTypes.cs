@@ -1,16 +1,15 @@
 ﻿namespace InfoMarkup
 {
     // ========================================================================================================================================
-    // InfoType
+    // ValueType
     // ========================================================================================================================================
 
-    public enum InfoType
+    public enum ValueType
     {
-        None,
-        ElementStart,   // start of an element after its tag and parameters are available
-        ElementClose,   // before an element closes, so all attributes will be available
-        Attribute,      //
-        Option          // 
+        Empty,
+        Text,
+        Number,
+        Group
     }
 
     // ========================================================================================================================================
@@ -19,9 +18,21 @@
 
     public class InfoValue
     {
+        public static InfoValue empty = new InfoValue();
+
+        public virtual ValueType GetValueType()
+        {
+            return ValueType.Empty;
+        }
+
         public virtual int GetCount()
         {
             return 0;
+        }
+
+        public virtual InfoValue GetSubValue(int i)
+        {
+            return null;
         }
 
         public virtual string GetString(string fallback = "")
@@ -68,9 +79,24 @@
             value = str;
         }
 
+        public override ValueType GetValueType()
+        {
+            return ValueType.Text;
+        }
+
+        public override int GetCount()
+        {
+            return 1;
+        }
+
         public override string GetString(string fallback = "")
         {
             return value;
+        }
+
+        public override string GetStringAt(int index, string fallback = "")
+        {
+            return index == 0 ? value : fallback;
         }
     }
 
@@ -87,9 +113,24 @@
             value = num;
         }
 
+        public override ValueType GetValueType()
+        {
+            return ValueType.Number;
+        }
+
+        public override int GetCount()
+        {
+            return 1;
+        }
+
         public override string GetString(string fallback = "")
         {
             return value.ToString();
+        }
+
+        public override string GetStringAt(int index, string fallback = "")
+        {
+            return index == 0 ? value.ToString() : fallback;
         }
 
         public override int GetInteger(int fallback = 0)
@@ -110,24 +151,36 @@
     public class InfoGroup : InfoValue
     {
         public InfoValue[] values;
+        private readonly int count;
 
         public InfoGroup(InfoValue[] arr)
         {
-            values = arr;
+            values  = arr;
+            count   = arr != null ? arr.Length : 0;
+        }
+
+        public override ValueType GetValueType()
+        {
+            return ValueType.Group;
         }
 
         public override int GetCount()
         {
-            return values?.Length ?? 0;
+            return count;
+        }
+
+        public override InfoValue GetSubValue(int index)
+        {
+            return (index >= 0 && index < count) ? values[index] : null;
         }
 
         public override string GetString(string fallback = "")
         {
-            if (values == null || values.Length < 1)
+            if (values == null)
                 return fallback;
 
             string result = values[0].GetString();
-            for (int i = 1, s = values.Length; i < s; ++i)
+            for (int i = 1; i < count; ++i)
                 result += ", " + values[i].GetString();
 
             return result;
@@ -135,27 +188,27 @@
 
         public override string GetStringAt(int index, string fallback = "")
         {
-            return (index >= 0 && index < values.Length) ? values[index].GetString(fallback) : fallback;
+            return (index >= 0 && index < count) ? values[index].GetString(fallback) : fallback;
         }
 
         public override int GetInteger(int fallback = 0)
         {
-            return values.Length > 0 ? values[0].GetInteger(fallback) : fallback;
+            return count > 0 ? values[0].GetInteger(fallback) : fallback;
         }
 
         public override int GetIntegerAt(int index, int fallback = 0)
         {
-            return (index >= 0 && index < values.Length) ? values[index].GetInteger(fallback) : fallback;
+            return (index >= 0 && index < count) ? values[index].GetInteger(fallback) : fallback;
         }
 
         public override float GetFloat(float fallback = 0.0f)
         {
-            return values.Length > 0 ? values[0].GetFloat(fallback) : fallback;
+            return count > 0 ? values[0].GetFloat(fallback) : fallback;
         }
 
         public override float GetFloatAt(int index, float fallback = 0.0f)
         {
-            return (index >= 0 && index < values.Length) ? values[index].GetFloat(fallback) : fallback;
+            return (index >= 0 && index < count) ? values[index].GetFloat(fallback) : fallback;
         }
     }
 }

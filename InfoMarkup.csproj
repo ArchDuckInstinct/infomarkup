@@ -43,8 +43,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="InfoMarkupConfiguration.cs" />
+    <Compile Include="InfoMarkupParsing.cs" />
     <Compile Include="InfoMarkupReader.cs" />
     <Compile Include="InfoMarkupTypes.cs" />
+    <Compile Include="InfoMarkupValidator.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

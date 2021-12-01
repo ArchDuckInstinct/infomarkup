@@ -6,10 +6,23 @@ using System.IO;
 namespace InfoMarkup
 {
     // ========================================================================================================================================
+    // NodeType
+    // ========================================================================================================================================
+
+    public enum NodeType
+    {
+        None,
+        ElementStart,   // After reading an element, the element's tag and parameters are available
+        ElementClose,   // After leaving an element's scope, the element's tag, parameters, and attributes are available
+        Attribute,      // After reading an attribute, its key and values are available
+        Option          // After reading an option, its value is available
+    }
+
+    // ========================================================================================================================================
     // InfoMarkupReader
     // ========================================================================================================================================
 
-    public class InfoMarkupReader
+    public partial class InfoMarkupReader
     {
         // ====================================================================================================================================
         // Components
@@ -31,24 +44,26 @@ namespace InfoMarkup
         private int depthCurr;
         private int chrNumber;
         private int lineNumber;
+        private int allowed;
 
         // ====================================================================================================================================
         // Data
         // ====================================================================================================================================
 
-        private class AttributeStack
+        internal class AttributeStack
         {
             public string key;
             public Stack<InfoValue> values;
         }
 
-        private class Scope
+        internal class Scope
         {
             public Scope parent;
             public int depth;
             public string tag;
             public InfoValue parameters;
             public Stack<AttributeStack> attributes;
+            public int subElementCount;
 
             public Scope(Scope p)
             {
@@ -58,17 +73,21 @@ namespace InfoMarkup
 
         private Dictionary<string, AttributeStack> dataMap;
         private HashSet<string> existingAttributes;
-        private Scope scope;
+        private InfoValue parameters;
+        internal Scope scope;
+        private Stack<int> scopeLock;
+        private InfoMarkupValidator activeValidator;
 
         // ====================================================================================================================================
         // Accessor
         // ====================================================================================================================================
 
-        public InfoType type            {get; private set;}
-        public string currentTag        {get {return scope?.tag ?? "";}}
+        public NodeType currentNodeType {get; private set;}
+        public string currentTag        {get; private set;}
         public string currentKey        {get; private set;}
         public InfoValue currentValue   {get; private set;}
-        public int currentDepth         {get {return scope?.depth ?? 0;}}
+        public int currentDepth         {get; private set;}
+        public int subElementCount      {get; private set;}
 
         // ====================================================================================================================================
         // Constructor / Destructor
@@ -83,6 +102,14 @@ namespace InfoMarkup
             dataMap             = new Dictionary<string, AttributeStack>();
             existingAttributes  = new HashSet<string>();
             scope               = null;
+            scopeLock           = new Stack<int>();
+
+            currentNodeType = NodeType.None;
+            currentTag      = "";
+            currentKey      = "";
+            currentValue    = InfoValue.empty;
+            currentDepth    = 0;
+            subElementCount = 0;
         }
 
         ~InfoMarkupReader()
@@ -91,7 +118,7 @@ namespace InfoMarkup
         }
 
         // ====================================================================================================================================
-        // Error Throwing
+        // Utility
         // ====================================================================================================================================
 
         private void Error(string msg)
@@ -105,6 +132,9 @@ namespace InfoMarkup
 
         private bool Next()
         {
+            if (--allowed < 0)
+                Error(string.Format("File size limit ({0} mbs) exceeded.", config.readLimit / 1048576));
+
             if (pos >= len)
             {
                 len = stream.Read(buffer, 0, buffer.Length);
@@ -199,261 +229,20 @@ namespace InfoMarkup
         }
 
         // ====================================================================================================================================
-        // Parsing
-        // ====================================================================================================================================
-
-        private InfoValue ParseText(char delimiter)
-        {
-            Skip(delimiter);
-
-            while (chr != delimiter)
-            {
-                if (chr == '\\')
-                {
-                    // Found a backslash, check if it is escaping a control character or the delimiter
-
-                    Expect();
-
-                    if (chr == '\\')
-                        builder.Append('\\');
-                    else if (chr == 't')
-                        builder.Append('\t');
-                    else if (chr == 'n')
-                        builder.Append('\n');
-                    else if (chr == delimiter)
-                        builder.Append(delimiter);
-                    else
-                    {
-                        builder.Append('\\');
-                        builder.Append(chr);
-                    }
-                }
-                else
-                    builder.Append(chr);
-
-                Expect();
-            }
-
-            SkipUnless('\n');
-
-            return new InfoString(builder.ToString());
-        }
-
-        private InfoValue ParseNumber()
-        {
-            // Get digits of integer value
-            while (chr >= '0' && chr <= '9')
-            {
-                builder.Append(chr);
-                Expect();
-            }
-            
-            // Get remaining digits of a float value if there is a decimal
-            if (chr == '.')
-            {
-                builder.Append(chr);
-
-                while (chr >= '0' && chr <= '9')
-                {
-                    builder.Append(chr);
-                    Expect();
-                }
-            }
-
-            string numStr   = builder.ToString();
-            float value     = float.Parse(numStr);
-
-            // Attempt to apply optional unit scale or percentage
-            if (chr >= '!' && chr != ']')
-            {
-                builder.Clear();
-                while (chr >= '!' && chr != ']' && chr != ')')
-                {
-                    builder.Append(chr);
-                    Expect();
-                }
-
-                string postfix = builder.ToString();
-
-                if (postfix == "%")
-                    value = GetAttributeFloat(currentKey, 0.0f) * (float) (value * 0.01);
-                else if (!config.ApplyUnitScale(postfix, ref value))
-                    return new InfoString(numStr + postfix);
-            }
-
-            return new InfoNumber(value);
-        }
-
-        private InfoValue ParseModifier()
-        {
-            AttributeStack attrStack;
-
-            Skip('+');
-
-            if (chr == '-' || chr == '.')
-            {
-                // append the starting minus or decimal
-                builder.Append(chr);
-                Expect();
-            }
-
-            if (!(chr >= '0' && chr <= '9'))
-                return ParseGeneral();
-
-            if (dataMap.TryGetValue(currentKey, out attrStack))
-            {
-                InfoValue val   = ParseNumber();
-                InfoNumber num  = val as InfoNumber;
-
-                if (num != null)
-                    num.value += (attrStack.values.Count > 0) ? attrStack.values.Peek().GetFloat() : 0.0f;
-
-                return val;
-            }
-            
-            // Treat this as a regular number if there is no attribute stack
-            return ParseNumber();
-        }
-
-        private InfoValue ParseGeneral()
-        {
-            while (chr >= '!' && chr != ']' && chr != ')')
-            {
-                builder.Append(chr);
-                Expect();
-            }
-
-            return new InfoString(builder.ToString());
-        }
-
-        private InfoValue ParseGroup(InfoValue first, char delimiter, char start = '\0')
-        {
-            List<InfoValue> values = new List<InfoValue>();
-
-            if (first != null)
-                values.Add(first);
-
-            Skip(start);
-
-            while (chr != delimiter)
-            {
-                if (values.Count >= config.groupLimit)
-                    Error("Group maximum count exceeded");
-                if (chr == '\n')
-                    Error("Multiline groups not yet implemented.");
-
-                values.Add(ParseToken());
-                NextChr();
-            }
-
-            SkipUnless('\n');
-
-            return new InfoGroup(values.ToArray());
-        }
-
-        private InfoValue ParseGroup(char delimiter, char start = '\0')
-        {
-            return ParseGroup(null, delimiter, start);
-        }
-
-        private InfoValue ParseToken()
-        {
-            builder.Clear();
-
-            if (chr == '\'')
-                return ParseText('\'');
-            else if (chr == '"')
-                return ParseText('"');
-            else if (chr == '(')
-                return ParseGroup(')', '(');
-            else
-            {
-                if (chr == '+')
-                    return ParseModifier();
-                else if (chr == '-' || chr == '.')
-                {
-                    // append the starting minus or decimal
-                    builder.Append(chr);
-                    Expect();
-
-                    if ((chr >= '0' && chr <= '9'))
-                        return ParseNumber();
-                    else
-                        return ParseGeneral();
-                }
-                else if ((chr >= '0' && chr <= '9'))
-                    return ParseNumber();
-                else
-                    return ParseGeneral();
-            }
-        }
-
-        private void ParseElement()
-        {
-            Skip('[');
-            NextChr();
-
-            // Create the scope for this element
-            ScopePush(depthCurr);
-
-            // Get element tag
-            builder.Clear();
-            while (chr >= '!')
-            {
-                if (chr == ']')
-                    break;
-
-                builder.Append(chr);
-                Expect();
-            }
-
-            scope.tag = builder.ToString().ToLower();
-
-            // Get optional element parameters
-            NextChr();
-            scope.parameters = (chr != ']') ? ParseGroup(']') : null;
-
-            type = InfoType.ElementStart;
-        }
-
-        private void ParseAttribute()
-        {
-            builder.Clear();
-
-            currentValue = ParseToken();
-            NextChr();
-
-            if (chr != '\n')
-            {
-                type = InfoType.Attribute;
-                currentKey = currentValue.GetString().ToLower();
-
-                builder.Clear();
-                currentValue = ParseToken();
-
-                NextChr();
-
-                if (chr >= '!')
-                    currentValue = ParseGroup(currentValue, '\n');
-
-                AddAttribute(currentKey, currentValue);
-            }
-            else
-            {
-                type = InfoType.Option;
-                currentKey = null;
-            }
-        }
-
-        // ====================================================================================================================================
         // Scope
         // ====================================================================================================================================
 
         private void ScopePush(int depth)
         {
-            scope               = new Scope(scope);
-            scope.attributes    = new Stack<AttributeStack>();
-            scope.depth         = depth;
+            scope                   = new Scope(scope);
+            scope.attributes        = new Stack<AttributeStack>();
+            scope.depth             = depth;
+            scope.subElementCount   = 0;
+            currentTag              = null;
+            currentDepth            = scope.depth;
+            parameters              = InfoValue.empty;
+
+            subElementCount = 0;
 
             existingAttributes.Clear();
         }
@@ -467,11 +256,25 @@ namespace InfoMarkup
             // Rewind scope back to previous scope
             scope = scope.parent;
 
-            // Reset existing attributes to newly active scope
-            existingAttributes.Clear();
+            // Reset existing tag, depth, and attributes to newly active scope
             if (scope != null)
+            {
+                currentTag      = scope.tag;
+                currentDepth    = scope.depth;
+                parameters      = scope.parameters;
+                
+                subElementCount = ++scope.subElementCount;
+
+                existingAttributes.Clear();
                 foreach (AttributeStack attrStack in scope.attributes)
                     existingAttributes.Add(attrStack.key);
+            }
+            else
+            {
+                currentTag      = "";
+                currentDepth    = 0;
+                subElementCount = 0;
+            }
         }
 
         // ====================================================================================================================================
@@ -506,38 +309,36 @@ namespace InfoMarkup
             }
         }
 
-        public string GetAttributeString(string key, string fallback = "")
+        public InfoValue GetAttribute(string key)
         {
             AttributeStack attr;
+            
             if (dataMap.TryGetValue(key, out attr) && attr.values.Count > 0)
-                return attr.values.Peek().GetString(fallback);
-            else
-                return fallback;
+                return attr.values.Peek();
+            
+            return InfoValue.empty;
         }
 
-        public int GetAttributeInteger(string key, int fallback = 0)
+        public InfoValue GetAttributeUnderived(string key)
         {
             AttributeStack attr;
-            if (dataMap.TryGetValue(key, out attr) && attr.values.Count > 0)
-                return attr.values.Peek().GetInteger(fallback);
-            else
-                return fallback;
+
+            if (existingAttributes.Contains(key) && dataMap.TryGetValue(key, out attr) && attr.values.Count > 0)
+                return attr.values.Peek();
+
+            return InfoValue.empty;
         }
 
-        public float GetAttributeFloat(string key, float fallback = 0.0f)
-        {
-            AttributeStack attr;
-            if (dataMap.TryGetValue(key, out attr) && attr.values.Count > 0)
-                return attr.values.Peek().GetFloat(fallback);
-            else
-                return fallback;
-        }
-
-        public IEnumerator<KeyValuePair<string, InfoValue>> Attributes()
+        public IEnumerable<(string key, InfoValue value)> Attributes()
         {
             if (scope != null)
                 foreach (AttributeStack attrStack in scope.attributes)
-                    yield return new KeyValuePair<string, InfoValue>(attrStack.key, attrStack.values.Peek());
+                    yield return (attrStack.key, attrStack.values.Peek());
+        }
+
+        public IEnumerable<string> AttributeKeys()
+        {
+            return existingAttributes;
         }
 
         // ====================================================================================================================================
@@ -546,30 +347,24 @@ namespace InfoMarkup
 
         public int GetParameterCount()
         {
-            return scope?.parameters?.GetCount() ?? 0;
+            return parameters.GetCount();
         }
 
-        public Type GetParameterType(int index)
+        public InfoValue GetParameter(int index)
         {
-            if (index >= 0 && index < scope.parameters.GetCount())
-                (scope.parameters as InfoGroup).values.GetType();
-
-            return null;
+            return parameters.GetSubValue(index);
         }
 
-        public string GetParameterString(int index, string fallback = "")
+        public IEnumerable<(int index, InfoValue value)> Parameters()
         {
-            return scope?.parameters?.GetStringAt(index, fallback) ?? fallback;
+            for (int i = 0, s = parameters.GetCount(); i < s; ++i)
+                yield return (i, parameters.GetSubValue(i));
         }
 
-        public int GetParameterInteger(int index, int fallback = 0)
+        public IEnumerable<InfoValue> ParameterValues()
         {
-            return scope?.parameters?.GetIntegerAt(index, fallback) ?? fallback;
-        }
-
-        public float GetParameterFloat(int index, float fallback = 0.0f)
-        {
-            return scope?.parameters?.GetFloatAt(index, fallback) ?? fallback;
+            for (int i = 0, s = parameters.GetCount(); i < s; ++i)
+                yield return parameters.GetSubValue(i);
         }
 
         // ====================================================================================================================================
@@ -586,18 +381,24 @@ namespace InfoMarkup
 
             stream = new StreamReader(path);
 
-            // Reset data
-            chr         = '\0';
-            pos         = 0;
-            len         = 0;
-            eof         = false;
-            depthCurr   = 0;
-            lineNumber  = 1;
-            chrNumber   = 1;
-            scope       = null;
-            type        = InfoType.None;
-
+            // Reset data before parsing new file
+            chr             = '\0';
+            pos             = 0;
+            len             = 0;
+            eof             = false;
+            depthCurr       = 0;
+            lineNumber      = 1;
+            chrNumber       = 1;
+            scope           = null;
+            currentNodeType = NodeType.None;
+            currentTag      = "";
+            currentKey      = "";
+            currentValue    = InfoValue.empty;
+            currentDepth    = 0;
+            subElementCount = 0;
+            allowed         = config.readLimit;
             dataMap.Clear();
+            scopeLock.Clear();
 
             return true;
         }
@@ -611,7 +412,7 @@ namespace InfoMarkup
         public bool Read()
         {
             // Get next content line or pop an element scope
-            if (type != InfoType.ElementClose)
+            if (currentNodeType != NodeType.ElementClose)
                 NextContentLine();
             else
                 ScopePop();
@@ -619,14 +420,21 @@ namespace InfoMarkup
             // Detect if an element is being closed
             if (scope != null && depthCurr <= scope.depth)
             {
-                type = InfoType.ElementClose;
+                currentNodeType = NodeType.ElementClose;
+
+                if (scopeLock.Count > 0 && depthCurr <= scopeLock.Peek())
+                {
+                    scopeLock.Pop();
+                    return false;
+                }
+
                 return true;
             }
             else if (eof)
                 return false;
 
             // Reset type and depth
-            type = InfoType.None;
+            currentNodeType = NodeType.None;
 
             // Reading element, attribute, or option
             if (chr == '[')
@@ -637,6 +445,53 @@ namespace InfoMarkup
                 Error("Invalid line start");
 
             return true;
+        }
+
+        public void SetValidator(InfoMarkupValidator validator)
+        {
+            activeValidator = validator;
+        }
+
+        public bool ReadValidated()
+        {
+            bool result = Read();
+            string errorMsg = "";
+
+            if (!activeValidator.Validate(this, ref errorMsg))
+                Error(errorMsg);
+
+            return result;
+        }
+
+        public bool ReadElement()
+        {
+            while (Read())
+                if (currentNodeType == NodeType.ElementStart || currentNodeType == NodeType.ElementClose)
+                    return true;
+
+            return false;
+        }
+
+        public bool LockScope()
+        {
+            if (scope != null)
+            {
+                scopeLock.Push(scope.depth);
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool LockScope(string tag)
+        {
+            if (scope != null && scope.tag == tag)
+            {
+                scopeLock.Push(scope.depth);
+                return true;
+            }
+
+            return false;
         }
     }
 }
