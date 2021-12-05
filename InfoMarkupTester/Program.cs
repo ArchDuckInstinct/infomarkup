@@ -24,9 +24,9 @@ namespace InfoMarkupTester
 
             InfoMarkupValidator validator = new InfoMarkupValidator();
             validator.SetElementRules("moveset", "string", "/", "");
-            validator.SetElementRules("move", "string?,string?", "moveset,move,move*", "startup,evade,impact,duration,recovery,chain,input,damage,poise,stamina,anim,can_cancel,is_starter,type");
-            validator.SetElementRules("move*", "string?,string?", "moveset,move,move*", "startup,evade,impact,duration,recovery,chain,input,damage,poise,stamina,anim,can_cancel,is_starter,type");
-            validator.SetElementRules("stance", "string?,string?", "moveset", "startup,chain");
+            validator.SetElementRules("move", "?string,string", "moveset,move,move*", "startup,evade,impact,duration,recovery,chain,input,damage,poise,stamina,anim,can_cancel,is_starter,type");
+            validator.SetElementRules("move*", "?string,string", "moveset,move,move*", "startup,evade,impact,duration,recovery,chain,input,damage,poise,stamina,anim,can_cancel,is_starter,type");
+            validator.SetElementRules("stance", "?string,string", "moveset", "startup,chain");
             validator.SetElementRules("event", "string|group", "move,stance", "apply");
             validator.SetElementRules("effect", "string", "moveset", "duration,limit,force,disable");
             validator.SetElementRules("interval", "number", "effect", "");
@@ -177,75 +177,14 @@ namespace InfoMarkupTester
 
             }
 
-            private class Resolver
-            {
-                public class Pair
-                {
-                    public List<Transition> list;
-                    public Move existingMove;
-                }
-
-                public Dictionary<string, Pair> map;
-
-                public Resolver()
-                {
-                    map = new Dictionary<string, Pair>();
-                }
-
-                public Move Link(Transition transition, string key)
-                {
-                    Pair obj;
-                    
-                    if (!map.TryGetValue(key, out obj))
-                    {
-                        obj                 = new Pair();
-                        obj.list            = new List<Transition>();
-                        obj.existingMove    = null;
-
-                        map.Add(key, obj);
-                    }
-
-                    if (obj.existingMove != null)
-                        return obj.existingMove;
-
-                    obj.list.Add(transition);
-                    return null;
-                }
-
-                public void Resolve(string key, Move move)
-                {
-                    Pair obj;
-
-                    if (map.TryGetValue(key, out obj))
-                    {
-                        if (obj.list != null)
-                        {
-                            foreach (Transition item in obj.list)
-                                item.pendingMove = move;
-
-                            obj.list = null;
-                        }
-
-                        obj.existingMove = move;
-                    }
-                    else
-                    {
-                        obj                 = new Pair();
-                        obj.list            = null;
-                        obj.existingMove    = move;
-
-                        map.Add(key, obj);
-                    }
-                }
-            }
-
             public bool Load(InfoMarkupReader reader)
             {
                 if (!reader.LockScope("moveset"))
                     return false;
 
-                List<Move> moves    = new List<Move>();
-                Resolver resolver   = new Resolver();
+                InfoMarkupResolver<Move, Transition> resolver = new InfoMarkupResolver<Move, Transition>((Move m, Transition t) => {t.pendingMove = m;});
+
+                List<Move> moves = new List<Move>();
                 MoveAttack attack;
                 char direction;
                 string name;
@@ -319,7 +258,7 @@ namespace InfoMarkupTester
 
                                         transition.onSuccessOnly    = false;
                                         transition.branchTiming     = chainValues.GetSubValue(i).GetFloatAt(1, 0.0f);
-                                        transition.pendingMove      = resolver.Link(transition, chainValues.GetSubValue(i).GetStringAt(0));
+                                        transition.pendingMove      = resolver.Link(chainValues.GetSubValue(i).GetStringAt(0), transition);
 
                                         attack.transitions[i] = transition;
                                     }

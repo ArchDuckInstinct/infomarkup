@@ -160,6 +160,7 @@ namespace InfoMarkup
                 values.Add(first);
 
             Skip(start);
+            NextChr();
 
             while (chr != delimiter)
             {

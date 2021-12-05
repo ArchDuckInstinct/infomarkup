@@ -45,6 +45,7 @@
     <Compile Include="InfoMarkupConfiguration.cs" />
     <Compile Include="InfoMarkupParsing.cs" />
     <Compile Include="InfoMarkupReader.cs" />
+    <Compile Include="InfoMarkupResolver.cs" />
     <Compile Include="InfoMarkupTypes.cs" />
     <Compile Include="InfoMarkupValidator.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
