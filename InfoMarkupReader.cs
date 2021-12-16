@@ -64,6 +64,7 @@ namespace InfoMarkup
             public InfoValue parameters;
             public Stack<AttributeStack> attributes;
             public int subElementCount;
+            public int optionStart;
 
             public Scope(Scope p)
             {
@@ -77,6 +78,8 @@ namespace InfoMarkup
         internal Scope scope;
         private Stack<int> scopeLock;
         private InfoMarkupValidator activeValidator;
+        private List<InfoValue> options;
+        private int optionStart;
 
         // ====================================================================================================================================
         // Accessor
@@ -101,6 +104,7 @@ namespace InfoMarkup
             buffer              = new char[config.bufferSize];
             dataMap             = new Dictionary<string, AttributeStack>();
             existingAttributes  = new HashSet<string>();
+            options             = new List<InfoValue>();
             scope               = null;
             scopeLock           = new Stack<int>();
 
@@ -238,11 +242,13 @@ namespace InfoMarkup
             scope.attributes        = new Stack<AttributeStack>();
             scope.depth             = depth;
             scope.subElementCount   = 0;
+            scope.optionStart       = options.Count;
             currentTag              = null;
             currentDepth            = scope.depth;
             parameters              = InfoValue.empty;
 
             subElementCount = 0;
+            optionStart     = options.Count;
 
             existingAttributes.Clear();
         }
@@ -262,8 +268,12 @@ namespace InfoMarkup
                 currentTag      = scope.tag;
                 currentDepth    = scope.depth;
                 parameters      = scope.parameters;
-                
+
+                if (options.Count > optionStart)
+                    options.RemoveRange(optionStart, options.Count - optionStart);
+
                 subElementCount = ++scope.subElementCount;
+                optionStart     = scope.optionStart;
 
                 existingAttributes.Clear();
                 foreach (AttributeStack attrStack in scope.attributes)
@@ -274,6 +284,8 @@ namespace InfoMarkup
                 currentTag      = "";
                 currentDepth    = 0;
                 subElementCount = 0;
+                optionStart     = 0;
+                options.Clear();
             }
         }
 
@@ -342,6 +354,77 @@ namespace InfoMarkup
         }
 
         // ====================================================================================================================================
+        // Options
+        // ====================================================================================================================================
+
+        private void AddOption(InfoValue value)
+        {
+            options.Add(value);
+        }
+
+        public int GetOptionCount()
+        {
+            return options.Count - optionStart;
+        }
+
+        public InfoValue GetOption(int index)
+        {
+            index += optionStart;
+
+            return (index >= optionStart && index < options.Count) ? options[index] : InfoValue.empty;
+        }
+
+        public bool OptionsContain(string match)
+        {
+            for (int i = optionStart, s = options.Count; i < s; ++i)
+                if (options[i].GetString() == match)
+                    return true;
+
+            return false;
+        }
+
+        public IEnumerable<InfoValue> Options()
+        {
+            for (int i = optionStart, s = options.Count; i < s; ++i)
+                yield return options[i];
+        }
+
+        public string[] OptionsToArray()
+        {
+            if (optionStart < options.Count)
+            {
+                string[] result = new string[options.Count - optionStart];
+                for (int i = optionStart, s = options.Count, j = 0; i < s; ++i, ++j)
+                    result[j] = options[i].GetString();
+
+                return result;
+            }
+
+            return null;
+        }
+
+        public void CopyOptionsTo(string[] dst, int start = 0)
+        {
+            if (optionStart < options.Count)
+            {
+                dst = new string[options.Count - optionStart];
+                for (int i = optionStart, s = options.Count, j = start; i < s; ++i, ++j)
+                    dst[j] = options[i].GetString();
+            }
+        }
+
+        public void CopyOptionsTo(Dictionary<string, string> dst)
+        {
+            if (optionStart < options.Count)
+            {
+                for (int i = optionStart, s = options.Count, j = 0; i < s; ++i, ++j)
+                    dst.Add(options[i].GetStringAt(0), options[i].GetStringAt(1));
+            }
+            else
+                dst = null;
+        }
+
+        // ====================================================================================================================================
         // Parameters
         // ====================================================================================================================================
 
@@ -397,8 +480,10 @@ namespace InfoMarkup
             currentDepth    = 0;
             subElementCount = 0;
             allowed         = config.readLimit;
+            optionStart     = 0;
             dataMap.Clear();
             scopeLock.Clear();
+            options.Clear();
 
             return true;
         }

@@ -61,21 +61,19 @@ namespace InfoMarkup
         // API
         // ====================================================================================================================================
 
-        public A Link(string key, B target)
+        public void Link(string key, B target)
         {
             Item item;
 
             if (map.TryGetValue(key, out item))
             {
                 if (item.value != null)
-                    return item.value;
-
-                item.node = new Node(item.node, target);
+                    onResolve(item.value, target);
+                else
+                    item.node = new Node(item.node, target);
             }
             else
                 map.Add(key, new Item(new Node(null, target), null));
-
-            return null;
         }
 
         public void Resolve(string key, A instance)

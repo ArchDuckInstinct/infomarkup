@@ -33,6 +33,59 @@ namespace InfoMarkup
                 allowedParameters   = null;
                 optionalStart       = -1;
             }
+
+            public void ApplyContainers(string value)
+            {
+                string[] tokens = value.Split(',');
+
+                allowedContainers = new HashSet<string>();
+                foreach (string token in tokens)
+                    allowedContainers.Add(token.Trim());
+            }
+
+            public void ApplyAttributes(string value)
+            {
+                string[] tokens = value.Split(',');
+
+                allowedAttributes = new HashSet<string>();
+                foreach (string token in tokens)
+                    allowedAttributes.Add(token.Trim());
+            }
+
+            public void ApplyParameters(string value)
+            {
+                string[] tokens = value.Split(','), subtokens;
+                string types;
+
+                allowedParameters   = new ParameterRules[tokens.Length];
+                optionalStart       = -1;
+
+                for (int i = 0, s = tokens.Length; i < s; ++i)
+                {
+                    types                   = tokens[i].ToLower();
+                    allowedParameters[i]    = new ParameterRules();
+
+                    if (types.StartsWith("?"))
+                    {
+                        types = types.Substring(1);
+
+                        if (optionalStart < 0)
+                            optionalStart = i;
+                    }
+
+                    subtokens = types.Split('|');
+
+                    foreach (string t in subtokens)
+                    {
+                        switch (t)
+                        {
+                            case "number": case "int": case "float":    allowedParameters[i].allowNumber    = true; break;
+                            case "string": case "text":                 allowedParameters[i].allowString    = true; break;
+                            case "group": case "array":                 allowedParameters[i].allowGroup     = true; break;
+                        }
+                    }
+                }
+            }
         }
 
         private Dictionary<string, ElementRules> elementRules;
@@ -50,12 +103,9 @@ namespace InfoMarkup
         // SetElementRules
         // ====================================================================================================================================
 
-        public void SetElementRules(string tag, string allowedParameters, string allowedContainers, string allowedAttributes)
+        public void SetElementRules(string tag, string parameters, string containers, string attributes)
         {
             ElementRules rules;
-            HashSet<string> set;
-            string[] tokens, subtokens;
-            int count = 0;
 
             if (!elementRules.TryGetValue(tag, out rules))
             {
@@ -63,66 +113,9 @@ namespace InfoMarkup
                 elementRules.Add(tag, rules);
             }
 
-            // Add allowed parameters
-            tokens                  = allowedParameters.Split(',');
-            rules.allowedParameters = new ParameterRules[tokens.Length];
-
-            foreach (string token in tokens)
-            {
-                string p = token.ToLower();
-
-                rules.allowedParameters[count] = new ParameterRules();
-
-                if (p.StartsWith("?"))
-                {
-                    p = p.Substring(1);
-
-                    if (rules.optionalStart < 0)
-                        rules.optionalStart = count;
-                }
-
-                subtokens = p.Split('|');
-
-                foreach (string t in subtokens)
-                {
-                    switch (t)
-                    {
-                        case "number":
-                        case "int":
-                        case "float":
-                            rules.allowedParameters[count].allowNumber = true;
-                            break;
-
-                        case "string":
-                        case "text":
-                            rules.allowedParameters[count].allowString = true;
-                            break;
-
-                        case "group":
-                        case "array":
-                            rules.allowedParameters[count].allowGroup = true;
-                            break;
-                    }
-                }
-
-                ++count;
-            }
-
-            // Add allowed containers
-            set     = new HashSet<string>();
-            tokens  = allowedContainers.Split(',');
-            foreach (string token in tokens)
-                set.Add(token.Trim());
-
-            rules.allowedContainers = set;
-
-            // Add allowed attributes
-            set     = new HashSet<string>();
-            tokens  = allowedAttributes.Split(',');
-            foreach (string token in tokens)
-                set.Add(token.Trim());
-
-            rules.allowedAttributes = set;
+            rules.ApplyContainers(containers);
+            rules.ApplyAttributes(attributes);
+            rules.ApplyParameters(parameters);
         }
 
         // ====================================================================================================================================

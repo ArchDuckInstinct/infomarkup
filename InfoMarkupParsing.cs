@@ -283,6 +283,8 @@ namespace InfoMarkup
             {
                 currentNodeType = NodeType.Option;
                 currentKey = null;
+
+                AddOption(currentValue);
             }
         }
     }
